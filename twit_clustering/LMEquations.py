@@ -64,7 +64,12 @@ def good_turing_eqn(my_lm, order, fullterm):
 ############# INTERPOLATION AND BACKOFF, RELYING ON MLE/PROB FNS ABOVE #################
 # eg my_lm.smoothing_eqn
 
-def linear_interpolation(my_lm, order, fullterm):
+def no_interpolation(my_lm, order, fullterm):
+    """Only the prob of the highest order taken."""
+    return my_lm.lm_params.lm_eqn(my_lm, order, fullterm)
+
+
+def linear_interpolation(my_lm, order, fullterm, customlamdas = None):
     """Linear interpolation calculation for the term, relying on the interpolation parameters first being set.
     Parameters are in mylm.params.parameters.
     Relies on another equation being available for the probability of the ngrams|history, eg MLE.
@@ -80,6 +85,9 @@ def linear_interpolation(my_lm, order, fullterm):
     probs_by_order = [my_lm.lm_params.lm_eqn(my_lm, my_lm.order, history[order-x:], word) for x in range(1, order+1)]
     # get the interpolation parameters
     params = my_lm.lm_params.parameters
+
+    if customlamdas is not None:
+        return [probs_by_order[x] * customlamdas[x] for x in range(len(probs_by_order))]
 
     # check parameters are correct, perform calculation
     if len(params) != len(probs_by_order):
@@ -173,11 +181,13 @@ def witten_bell(my_lm, order, fullterm):
 
     return lambdas
 
-def kneser_ney
+def kneser_ney():
+    pass # TODO
 
 
-def none_eqn(*args):
-    return []
+def ho_only(my_lm, order, *args):
+    """Return a vector of parameters to give probability=1 to the highest order. """
+    return [0 for x in range(order-1)]+[1]
 
 
 
