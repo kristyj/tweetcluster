@@ -11,9 +11,9 @@ class LanguageModel(object):
     Can print to file??"""
     startsymbol="<s>"; endsymbol="</s>"
 
-
-    def __init__(self, documents, n, lm, smoothing, discparams, holdbuild=False, bydoc=False, givedf=False):
+    def __init__(self, documents, n, lm_names, holdbuild=False, bydoc=False, givedf=False):
         """Build the language model based on the document.
+        lm_names is a len=3 list/tuple with the names of the base LM, smoothing LM and paramcalc.
         Use holdbuild to delay the building process til later."""
         #print(documents)
         if type(documents) != list: #document is filename
@@ -22,7 +22,7 @@ class LanguageModel(object):
                   'Please pre-open the file and break into words as a list.\n')
             raise TypeError
         else:
-            self.lm_params = LMParams(n, [lm, smoothing, discparams]) #now lm_params holds all the info about things that need to be trained
+            self.lm_params = LMParams(n, lm_names) #now lm_params holds all the info about things that need to be trained
             self.input = documents
             print("Now setting LM order")
             self.order = self.lm_params.order
@@ -53,9 +53,7 @@ class LanguageModel(object):
         end = [self.endsymbol]*self.order
         return [itertools.chain(start + x + end ) for x in doclist ]
 
-
-
-    def duplicate_to_ngrams(self,  sentencelist, n, delete_sss=False):  #works
+    def duplicate_to_ngrams(self, sentencelist, n, delete_sss=False):  #works
         """Take a list of text, turn into a list of n-grams.
         delete_sss excludes tokens that are only start/end of sentence symbols.
         This is used when evaluating test texts, a deque is used when training for efficiency."""
@@ -65,23 +63,6 @@ class LanguageModel(object):
 
         # return list of ngrams for the sentence given
         return [tuple(sentencelist[x: x+n]) for x in range(len(sentencelist)-n)]
-
-        #
-        # def make_tup(x,m):
-        #     return tuple(sentencelist[x : x+m])
-        # def check_not_end(x): #works
-        #     if x.count(LanguageModel.startsymbol) == len(x) or x.count(LanguageModel.endsymbol) == len(x):
-        #         return False #give false if all sss
-        #     else:
-        #         return True #give true if its not sss
-        #
-        # if delete_sss:
-        #     #print(range(len(sentencelist[n:])+1))
-        #     a = [tuple(sentencelist[x : x+n]) for x in range(len(sentencelist[n:])+1)]
-        #     return [y for y in a if check_not_end(y)==True]
-        # else:
-        #     return
-
 
     def build_ngrams(self, text_by_line, n, bydoc=False):
         """Construct self.ngrams based on text counts and parameters in self.lm_parameters.
@@ -102,10 +83,10 @@ class LanguageModel(object):
         self.df = {}
         self.lm_by_doc = []
 
-
-
-        self.ngrams = {m :  Counter() for m in range_to_build}  #  build descending ngram dicts
+        self.ngrams = {m:  Counter() for m in range_to_build}  #  build descending ngram dicts
         self.docfreq = {m: Counter() for m in range_to_build}
+
+        self.deleted_symbols = {m: Counter() for m in range(1, self.order)}
 
         # iterate over every doc/word
         for doc in  text_by_line :
@@ -113,20 +94,26 @@ class LanguageModel(object):
             thisdoc = {m: Counter() for m in range_to_build}
             for word in [self.startsymbol] * (self.order-1) + doc + [self.endsymbol] * (self.order-1):
                 # for each word
-                self.totalwords += 1
+                if word not in self.removesymbols:
+                    self.totalwords += 1 # TODO: This does not count start/end symbols
+
                 lastnwords.extend([word])
                 for m in range_to_build:        # do biggest possible ngram first
                     #print("Building this number of words", m, 'starting', n-m)
                     if m <= len(lastnwords):    # exclude where m does not get enough data eg start of text
 
                         # increment count for order, word combination
-                        mywords = list(itertools.islice(lastnwords, n-m, None)) # deque slicing
+                        mywords = list(itertools.islice(lastnwords, len(lastnwords)-m, None)) # deque slicing # need to take the last m words
+                        # OLD: mywords = list(itertools.islice(lastnwords, n-m, None)) # deque slicing
 
                         #mywords = tuple(lastnwords[(n-m):])
+                        print("m",m, "n",n)
+                        print(lastnwords)
                         print("mywords",mywords)
                         if tuple(mywords) not in self.removesymbols: # ignore exclusively start/end symbols
                             thisdoc[m][tuple(mywords)] += 1
-
+                        else:
+                            self.deleted_symbols[m][tuple(mywords)] += 1
             # If DF and by_document counts are required, update these
             if bydoc:
                 self.lm_by_doc.append(thisdoc)
@@ -139,18 +126,17 @@ class LanguageModel(object):
             for m in range_to_build:
                 self.ngrams[m].update(thisdoc[m])
 
-
     def build_count_of_counts(self):
         """Creat a dictionary with integers as keys and the number of items that occur with that frequency as value."""
         out_dict = {}
         for i, tupcount in self.ngrams.items():
             #print("tupcount",i,tupcount)
-            if not self.lm_params.save_lower_orders and i!= max(self.ngrams.keys()):
+            if not self.lm_params.save_lower_orders and i != max(self.ngrams.keys()):
                 #print(i)
                 continue
             out_dict[i] = Counter()
             for tup, freq in tupcount.items():
-                out_dict[i][freq] +=1
+                out_dict[i][freq] += 1
         self.count_of_counts = out_dict
         return out_dict
 
@@ -159,11 +145,59 @@ class LanguageModel(object):
         """Calculate the total number of grams (tokens) for each order, returning a dictionary"""
         return {i: sum(list(ngram_dict[i].values()))for i in ngram_dict.keys()}
 
-
     def calc_vocab_size(self):
         """Calculate the total number of types for each order returning a dictionary."""
         self.vocab_size = {i: len(self.ngrams[i].keys()) for i in self.ngrams.keys()}
         return self.vocab_size
+
+    def calculate_histories_continuations(self, conts=True, hists=True,):
+        """Iterate over all the n-grams and create dictionaries of how many alternative continuations/histories occur.
+        Access as self.continuation_counts[n][the_history], self.histories_counts[n][the_continuation]"""
+        self.continuation_counts = {m: {} for m in range(1, self.order)} # unigram to m-1
+
+        self.histories_counts = {m: {} for m in range(2, self.order + 1)} # bigram to m
+
+        for m in range(1, self.order + 1):
+            if conts:
+                if m-1 in self.continuation_counts.keys():  # if continuation should be calculated
+                    self.continuation_counts[m-1] = Counter([k[:-1] for k in self.ngrams[m].keys()])
+            if hists:
+                if m in self.histories_counts.keys(): # if histories should be calculated
+                    self.histories_counts[m-1] = Counter([k[1:] for k in self.ngrams[m].keys()])
+
+
+
+
+    def count_continuations(self, some_history):
+        """Given a tuple, return a number with the number of different (one-word) continuations that follow it."""
+        # TODO: This is inefficient because it iterates over all values. Grr.
+        found = 0
+        continuations = 0
+        hist_order = len(some_history)
+        max_occurs = self.ngrams[hist_order].get(some_history, 0)
+
+        while found < max_occurs:
+            for k, v in self.ngrams[hist_order + 1].items():
+                if k[:-1] == some_history:
+                    found += v
+                    continuations +=1
+
+        return continuations
+
+    def count_histories(self, some_continuation):
+        """Given some word/tuple, count how many different (one-word) histories come before it."""
+        # TODO: This is inefficient because of the excessive iterations (one over all ngrams for each call)
+        found = 0
+        histories = 0
+        cont_order = len(some_continuation)
+        max_occurs = self.ngrams[cont_order].get(some_continuation, 0)
+
+        while found < max_occurs:
+            for k, v in self.ngrams[cont_order + 1].items():
+                if k[1:] == some_continuation:
+                    found += v
+                    histories += 1
+        return histories
 
 
     def give_gram_prob(self, input_tuple, format=1):
@@ -185,7 +219,7 @@ class LanguageModel(object):
         """Calculate the probability of a sentence (using preset order and eqns, either log or linear depending on format."""
         print(self.duplicate_to_ngrams(sentence_list, self.order))
 
-        if format==1:
+        if format == 1:
             product = 1
 
             for tup in self.duplicate_to_ngrams(sentence_list, self.order):
@@ -199,7 +233,10 @@ class LanguageModel(object):
     def give_perplexity(self, sentence_list):
         """Calculate the perplexity of a sentence."""
         print(sentence_list, len(sentence_list))
-        return math.pow(- 1/len(sentence_list) * self.give_sentence_prob(sentence_list, format=2), 2)
+        print("sentence log2 prob is ", self.give_sentence_prob(sentence_list, format=2))
+        entropy = -1/len(sentence_list) * self.give_sentence_prob(sentence_list, format=2)
+        print('entropy is', entropy)
+        return math.pow(2, entropy)
 
 
     def increment_counts(self, sentence_list):
@@ -239,10 +276,13 @@ class LanguageModel(object):
 
 if __name__=="__main__":
     #testing - example sentences
-    sentences = [['This','is','an','example','sentence'],["this","is","an","example", "blackbird"]]
-
+    #sentences = [['This','is','an','example','sentence'],["this","is","an","example", "blackbird"]]
+    rawtext = "This is an example sentence\nthis is an example blackbird"
+    rawtext = "I am Sam\nSam I am\nI do not like green eggs and ham"
+    sentences = [x.split(' ')for x in rawtext.split('\n')]
+    print(sentences)
     # build the LM
-    mylm = LanguageModel(sentences, 3, 'add-one', 'none', 'none', holdbuild=False, bydoc=True, givedf=True)
+    mylm = LanguageModel(sentences, 2, ('maximum-likelihood', 'none', 'none'), holdbuild=False, bydoc=True, givedf=True)
     #args are: self, documents, n, lm, smoothing, discparams, holdbuild=False, bydoc=False, give_df=False):
 
     # inspect the global language model
@@ -250,13 +290,31 @@ if __name__=="__main__":
     print('count_of_counts', mylm.build_count_of_counts())
     print("Docfreq", mylm.docfreq)
     print("Vocabsize:", mylm.calc_vocab_size())
+    print("hidden counts", mylm.deleted_symbols)
 
-    a = mylm.give_gram_prob(["an", "example", "sentence"])
-    b = mylm.give_perplexity(["is", "an", "foo"])
-    c = mylm.give_sentence_prob(["this","is","an","example","blackbird",], format=1)
-    c2 = mylm.give_sentence_prob(["This","is","an","example","blackbird",], format=1)
-    d = mylm.give_perplexity(["This","is","an","example","blackbird",])
-    print(a, b, c, c2, d )
+    print(mylm.give_gram_prob(("<s>", "I")))
+    print(mylm.give_gram_prob(("Sam", "</s>")))
+    print(mylm.give_gram_prob(("<s>","Sam", )))
+    print(mylm.give_gram_prob(("am","Sam", )))
+    print(mylm.give_gram_prob(("I","am", )))
+    print(mylm.give_gram_prob(("I", "do")))
+
+
+
+    # # a = mylm.give_gram_prob(["an", "example", "sentence"])
+    # # b = mylm.give_perplexity(["is", "an", "foo"])
+    # c = mylm.give_perplexity(["this","is","an","example","blackbird",])
+    # # c2 = mylm.give_sentence_prob(["this","is","an","example","blackbird",], format=1)
+    # d = mylm.give_perplexity(["This","is","an","example","blackbird",])
+    # print("Seen sentence", c)
+    # e = mylm.give_perplexity("This is an example sentence".split(' '))
+    # print("This is example sentence", e)
+    # print('perplexity', d)
+
+
+    mylm.calculate_histories_continuations()
+    print(mylm.continuation_counts,)
+    print(mylm.histories_counts)
 
 
 
@@ -479,3 +537,20 @@ if __name__=="__main__":
 #         self.count_of_counts = self.build_count_of_counts() #self.ngrams#buildlowerorder = self.lm_params.save_lower_orders)
 #         self.wc = self.calc_total_wc(self.ngrams)
 #         self.vocabsize = self.calc_vocab_size(self.ngrams)
+
+
+        #
+        # def make_tup(x,m):
+        #     return tuple(sentencelist[x : x+m])
+        # def check_not_end(x): #works
+        #     if x.count(LanguageModel.startsymbol) == len(x) or x.count(LanguageModel.endsymbol) == len(x):
+        #         return False #give false if all sss
+        #     else:
+        #         return True #give true if its not sss
+        #
+        # if delete_sss:
+        #     #print(range(len(sentencelist[n:])+1))
+        #     a = [tuple(sentencelist[x : x+n]) for x in range(len(sentencelist[n:])+1)]
+        #     return [y for y in a if check_not_end(y)==True]
+        # else:
+        #     return
