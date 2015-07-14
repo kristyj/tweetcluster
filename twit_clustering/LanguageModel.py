@@ -11,6 +11,7 @@ class LanguageModel(object):
     Can print to file??"""
     startsymbol="<s>"; endsymbol="</s>"
 
+
     def __init__(self, documents, n, lm, smoothing, discparams, holdbuild=False, bydoc=False, givedf=False):
         """Build the language model based on the document.
         Use holdbuild to delay the building process til later."""
@@ -28,6 +29,10 @@ class LanguageModel(object):
             self.bydoc = bydoc
             self.give_df = givedf
 
+        # create a list of start/end symbols to be ignored in LM
+        from itertools import permutations
+        self.removesymbols = set(item for sublist in [permutations([LanguageModel.startsymbol]*self.order + [LanguageModel.endsymbol]* self.order, y) for y in range(self.order)] for item in sublist)
+        print(self.removesymbols)
 
         if not holdbuild:
             self.build_ngrams(self.input, self.order)
@@ -49,23 +54,33 @@ class LanguageModel(object):
         return [itertools.chain(start + x + end ) for x in doclist ]
 
 
-    @classmethod
-    def duplicate_to_ngrams(cls,  sentencelist, n, delete_sss=True):  #works
-        '''Take a list of text, turn into a list of n-grams.
-        delete_sss excludes tokens that are only start/end of sentence symbols.'''
-        def make_tup(x,m):
-            return tuple(sentencelist[x : x+m])
-        def check_not_end(x): #works
-            if x.count(LanguageModel.startsymbol) == len(x) or x.count(LanguageModel.endsymbol) == len(x):
-                return False #give false if all sss
-            else:
-                return True #give true if its not sss
-        if delete_sss:
-            #print(range(len(sentencelist[n:])+1))
-            a = [tuple(sentencelist[x : x+n]) for x in range(len(sentencelist[n:])+1)]
-            return [y for y in a if check_not_end(y)==True]
-        else:
-            return [tuple(sentencelist[x : x+n]) for x in range(len(sentencelist[n-1:]))]
+
+    def duplicate_to_ngrams(self,  sentencelist, n, delete_sss=False):  #works
+        """Take a list of text, turn into a list of n-grams.
+        delete_sss excludes tokens that are only start/end of sentence symbols.
+        This is used when evaluating test texts, a deque is used when training for efficiency."""
+
+        if not delete_sss:
+            sentencelist = [self.startsymbol] * (self.order - 1) + sentencelist + [self.endsymbol] * (self.order -1)
+
+        # return list of ngrams for the sentence given
+        return [tuple(sentencelist[x: x+n]) for x in range(len(sentencelist)-n)]
+
+        #
+        # def make_tup(x,m):
+        #     return tuple(sentencelist[x : x+m])
+        # def check_not_end(x): #works
+        #     if x.count(LanguageModel.startsymbol) == len(x) or x.count(LanguageModel.endsymbol) == len(x):
+        #         return False #give false if all sss
+        #     else:
+        #         return True #give true if its not sss
+        #
+        # if delete_sss:
+        #     #print(range(len(sentencelist[n:])+1))
+        #     a = [tuple(sentencelist[x : x+n]) for x in range(len(sentencelist[n:])+1)]
+        #     return [y for y in a if check_not_end(y)==True]
+        # else:
+        #     return
 
 
     def build_ngrams(self, text_by_line, n, bydoc=False):
@@ -87,14 +102,7 @@ class LanguageModel(object):
         self.df = {}
         self.lm_by_doc = []
 
-        # light processing to remove exclusively start/end symbols
-        from itertools import permutations
-        removeesymbols = set(item for sublist in [permutations([LanguageModel.startsymbol]*self.order + [LanguageModel.endsymbol]* self.order, y) for y in range(self.order)] for item in sublist)
-        print(removeesymbols)
 
-        # removeesymbols1 = set(tuple([LanguageModel.startsymbol] * x) for x in range(1,n+1))
-        # removeesymbols2 = set(tuple([LanguageModel.endsymbol] * x) for x in range(1,n+1))
-        # removeesymbols = removeesymbols1.union(removeesymbols2)
 
         self.ngrams = {m :  Counter() for m in range_to_build}  #  build descending ngram dicts
         self.docfreq = {m: Counter() for m in range_to_build}
@@ -116,7 +124,7 @@ class LanguageModel(object):
 
                         #mywords = tuple(lastnwords[(n-m):])
                         print("mywords",mywords)
-                        if tuple(mywords) not in removeesymbols: # ignore exclusively start/end symbols
+                        if tuple(mywords) not in self.removesymbols: # ignore exclusively start/end symbols
                             thisdoc[m][tuple(mywords)] += 1
 
             # If DF and by_document counts are required, update these
@@ -131,101 +139,9 @@ class LanguageModel(object):
             for m in range_to_build:
                 self.ngrams[m].update(thisdoc[m])
 
-    #
-    #
-    #
-    #
-    #
-    # def build_ngram_counts(self, textinput_iterator, n,
-    #                        buildlowerorder=self.lm.save_lower_orders,
-    #                        givelines = True,
-    #                        givedf=self.bydoc,
-    #                        , givelines=False, givedf=False):
-    #     #TODO: May contain extra start/end tokens
-    #     """Put together dictionaries of ngrams and how often they occur, where n is the order.
-    #     if buildlowerorder then self.ngrams[1], self.ngrams[2] etc constructed, not just self.ngrams[n].
-    #     if givelines returned, return the number of documents, else 0
-    #     if givedf chosen, then document frequency is calculated, else a blank dictionary returned.
-    #     """
-    #
-    #     print("Building ngram counts now.")
-    #     totalwords = 0
-    #     lines = 0; df = {}
-    #     lastnwords = deque(maxlen=n) #initialise deque
-    #     range_to_build = (range(n, 0, -1) if buildlowerorder else range(n, n-2, -1))
-    #
-    #     print(removeesymbols)
-    #
-    #     #if buildlower is false, only builds the current n order and n-1 order (histories)
-    #
-    #     if givedf == False: #efficent, but takes corpus as one document
-    #         for word in textinput_iterator:
-    #             totalwords +=1
-    #             lastnwords.extend([word])
-    #             for m in range_to_build: #do biggest possible ngram first
-    #                 if m >= len(lastnwords): #cannot capture all orders at eg start of text
-    #                     # increment count for order, word combination
-    #                     mywords = list(itertools.islice(lastnwords, n-m, n))[0] #deque slicing
-    #                     #mywords = tuple(lastnwords[(n-m):])
-    #                     print("mywords",mywords)
-    #                     myCounters[m][tuple(mywords)] += 1
-    #         myCounters[0] ={(): totalwords}
-    #         if givelines is False and givedf is False:
-    #             return myCounters
-    #         # TODO: This is not an elegant solution to return variable args
-    #         else:
-    #             return itertools.compress([lines, df, myCounters], [0, 0, 1])  # return only myCounters
-    #
-    #     else: # returns extra info about document frequency, lines in corpus.
-    #         #only take this option if a 2d iterator is created.
-    #         myDocFreq = {m:Counter() for m in range_to_build}
-    #         prevword = ''
-    #         for word in textinput_iterator:
-    #             #print("This should be a word,", word)
-    #             totalwords +=1
-    #             if prevword != LanguageModel.startsymbol and word == LanguageModel.startsymbol:
-    #                 lastnwords.clear(); donotadd = []
-    #                 lines +=1
-    #             lastnwords.extend([word])
-    #             #print(lastnwords)
-    #             for m in range_to_build:
-    #                    # print("m", m)
-    #                     cn = len(lastnwords)
-    #                     if m <= cn:
-    #                         these_words = tuple(itertools.islice(lastnwords, cn-m, cn+1)) #list(itertools.islice(q, 3, 7))
-    #                         #print("thesewords",m, these_words)
-    #                         if these_words not in removeesymbols:
-    #                             myCounters[m][these_words] +=1
-    #                             if these_words not in donotadd:
-    #                                 myDocFreq[m][these_words] +=1
-    #                                 donotadd.append(these_words)
-    #                         else:
-    #                             pass
-    #                             #print("word in removesymbols")
-    #             prevword = word
-    #         myCounters[0] = {(): totalwords}
-    #         return itertools.compress([lines, myDocFreq, myCounters], [givelines, givedf, 1])
-    #
-    #
-    #         # for line in textinput_iterator: #for each line
-    #         #     lastnwords.clear()
-    #         #     donotadd = []
-    #         #     lines +=1
-    #         #     for word in line:
-    #         #         totalwords +=1
-    #         #         lastnwords.extend(word)
-    #         #         for m in range_to_build:
-    #         #             if m >= len(lastnwords):
-    #         #                 these_words = tuple(itertools.islice(lastnwords, n-m, len(lastnwords)+1)) #list(itertools.islice(q, 3, 7))
-    #         #                 myCounters[m][these_words] +=1
-    #         #                 if these_words not in donotadd:
-    #         #                     myDocFreq[m][these_words] +=1
-    #         #                     donotadd.append(these_words)
-    #         # myCounters[0] = {(): totalwords}
-    #         # return itertools.compress([lines, myDocFreq, myCounters], [givelines, givedf, 1])
-
 
     def build_count_of_counts(self):
+        """Creat a dictionary with integers as keys and the number of items that occur with that frequency as value."""
         out_dict = {}
         for i, tupcount in self.ngrams.items():
             #print("tupcount",i,tupcount)
@@ -240,56 +156,50 @@ class LanguageModel(object):
 
     @staticmethod
     def calc_total_wc(ngram_dict):
+        """Calculate the total number of grams (tokens) for each order, returning a dictionary"""
         return {i: sum(list(ngram_dict[i].values()))for i in ngram_dict.keys()}
 
 
     def calc_vocab_size(self):
+        """Calculate the total number of types for each order returning a dictionary."""
         self.vocab_size = {i: len(self.ngrams[i].keys()) for i in self.ngrams.keys()}
         return self.vocab_size
 
 
     def give_gram_prob(self, input_tuple, format=1):
+        """Give the probability of the ngram, either linear or log, depending on format."""
         input_tuple = tuple(input_tuple)
-        tuple_counts = [self.ngrams[i].get(input_tuple, 0) for i in range(1, self.order + 1) if i in self.ngrams.keys()]
-        #TODO: feed tuple counts, count_of_counts, wc, vocabsize into self.lmparams.lm_eqn etc and return probabiity
-        #print(self.lm_params.lm_eqn)
+
         p = self.lm_params.lm_eqn(self, self.order, input_tuple) #regular probability
+        if p == 0.0:
+            raise ZeroDivisionError
         #print("p",p)
         if format == 1:
             return p
         elif format == 2:
-            return -math.log2(p)
+            return math.log2(p)
         elif format == 10:
-            return -math.log10(p)
+            return math.log10(p)
 
     def give_sentence_prob(self, sentence_list, format=1):
+        """Calculate the probability of a sentence (using preset order and eqns, either log or linear depending on format."""
+        print(self.duplicate_to_ngrams(sentence_list, self.order))
+
         if format==1:
             product = 1
-            for tup in LanguageModel.duplicate_to_ngrams(sentence_list, self.order):
+
+            for tup in self.duplicate_to_ngrams(sentence_list, self.order):
                 product = product * self.give_gram_prob(tup, format=format)
             return product
-        else: # format == 2 or 10
-            return sum(self.give_gram_prob(tup, format=format) for tup in LanguageModel.duplicate_to_ngrams(sentence_list, self.order))
-
+        elif format == 2 or format ==10: # format == 2 or 10
+            return sum(self.give_gram_prob(tup, format=format) for tup in self.duplicate_to_ngrams(sentence_list, self.order))
+        else:
+            raise ValueError
 
     def give_perplexity(self, sentence_list):
-        return math.pow(- 1/len(sentence_list) * self.give_sentence_prob(format=2), 2)
-
-
-#
-# class GlobalLanguageModel(LanguageModel):
-#     '''Build a LM over all the documents in the input.'''
-#     def __init__(self, *args):
-#         LanguageModel.__init__(self, *args)
-#         #build a global counts over entire corpus for global stats
-#         print("we got here")
-#         self.lines, self.docfreq, self.ngrams = self.build_ngram_counts(self.make_flat_iterator(self.input), self.order,
-#                                               #buildlowerorder=self.lm_params.save_lower_orders,
-#                                               givedf=True, givelines=True)
-#         #each of these reiterates of the self.ngrams dict
-#         self.count_of_counts = self.build_count_of_counts() #self.ngrams#buildlowerorder = self.lm_params.save_lower_orders)
-#         self.wc = self.calc_total_wc(self.ngrams)
-#         self.vocabsize = self.calc_vocab_size(self.ngrams)
+        """Calculate the perplexity of a sentence."""
+        print(sentence_list, len(sentence_list))
+        return math.pow(- 1/len(sentence_list) * self.give_sentence_prob(sentence_list, format=2), 2)
 
 
     def increment_counts(self, sentence_list):
@@ -332,7 +242,7 @@ if __name__=="__main__":
     sentences = [['This','is','an','example','sentence'],["this","is","an","example", "blackbird"]]
 
     # build the LM
-    mylm = LanguageModel(sentences, 3, 'maximum-likelihood', 'none', 'none', holdbuild=False, bydoc=True, givedf=True)
+    mylm = LanguageModel(sentences, 3, 'add-one', 'none', 'none', holdbuild=False, bydoc=True, givedf=True)
     #args are: self, documents, n, lm, smoothing, discparams, holdbuild=False, bydoc=False, give_df=False):
 
     # inspect the global language model
@@ -342,10 +252,11 @@ if __name__=="__main__":
     print("Vocabsize:", mylm.calc_vocab_size())
 
     a = mylm.give_gram_prob(["an", "example", "sentence"])
-    b = mylm.give_gram_prob(["is", "an", "foo"])
-    c = mylm.give_sentence_prob(["This","is","an","example","blackbird",])
-
-    print(a, b, c)
+    b = mylm.give_perplexity(["is", "an", "foo"])
+    c = mylm.give_sentence_prob(["this","is","an","example","blackbird",], format=1)
+    c2 = mylm.give_sentence_prob(["This","is","an","example","blackbird",], format=1)
+    d = mylm.give_perplexity(["This","is","an","example","blackbird",])
+    print(a, b, c, c2, d )
 
 
 
@@ -458,3 +369,113 @@ if __name__=="__main__":
 #             doc_model = GlobalLanguageModel(document) #TODO: reset the params so that there is only the necessary order build
 #             self.tdm[row_id] = [doc_model.give_gram_prob(word) for word in restricted_vocab]
 #         print("Term document matrix initialised, it looks like this! ", self.tdm)
+
+
+    #
+    #
+    #
+    #
+    # def build_ngram_counts(self, textinput_iterator, n,
+    #                        buildlowerorder=self.lm.save_lower_orders,
+    #                        givelines = True,
+    #                        givedf=self.bydoc,
+    #                        , givelines=False, givedf=False):
+    #     #TODO: May contain extra start/end tokens
+    #     """Put together dictionaries of ngrams and how often they occur, where n is the order.
+    #     if buildlowerorder then self.ngrams[1], self.ngrams[2] etc constructed, not just self.ngrams[n].
+    #     if givelines returned, return the number of documents, else 0
+    #     if givedf chosen, then document frequency is calculated, else a blank dictionary returned.
+    #     """
+    #
+    #     print("Building ngram counts now.")
+    #     totalwords = 0
+    #     lines = 0; df = {}
+    #     lastnwords = deque(maxlen=n) #initialise deque
+    #     range_to_build = (range(n, 0, -1) if buildlowerorder else range(n, n-2, -1))
+    #
+    #     print(removeesymbols)
+    #
+    #     #if buildlower is false, only builds the current n order and n-1 order (histories)
+    #
+    #     if givedf == False: #efficent, but takes corpus as one document
+    #         for word in textinput_iterator:
+    #             totalwords +=1
+    #             lastnwords.extend([word])
+    #             for m in range_to_build: #do biggest possible ngram first
+    #                 if m >= len(lastnwords): #cannot capture all orders at eg start of text
+    #                     # increment count for order, word combination
+    #                     mywords = list(itertools.islice(lastnwords, n-m, n))[0] #deque slicing
+    #                     #mywords = tuple(lastnwords[(n-m):])
+    #                     print("mywords",mywords)
+    #                     myCounters[m][tuple(mywords)] += 1
+    #         myCounters[0] ={(): totalwords}
+    #         if givelines is False and givedf is False:
+    #             return myCounters
+    #         # TODO: This is not an elegant solution to return variable args
+    #         else:
+    #             return itertools.compress([lines, df, myCounters], [0, 0, 1])  # return only myCounters
+    #
+    #     else: # returns extra info about document frequency, lines in corpus.
+    #         #only take this option if a 2d iterator is created.
+    #         myDocFreq = {m:Counter() for m in range_to_build}
+    #         prevword = ''
+    #         for word in textinput_iterator:
+    #             #print("This should be a word,", word)
+    #             totalwords +=1
+    #             if prevword != LanguageModel.startsymbol and word == LanguageModel.startsymbol:
+    #                 lastnwords.clear(); donotadd = []
+    #                 lines +=1
+    #             lastnwords.extend([word])
+    #             #print(lastnwords)
+    #             for m in range_to_build:
+    #                    # print("m", m)
+    #                     cn = len(lastnwords)
+    #                     if m <= cn:
+    #                         these_words = tuple(itertools.islice(lastnwords, cn-m, cn+1)) #list(itertools.islice(q, 3, 7))
+    #                         #print("thesewords",m, these_words)
+    #                         if these_words not in removeesymbols:
+    #                             myCounters[m][these_words] +=1
+    #                             if these_words not in donotadd:
+    #                                 myDocFreq[m][these_words] +=1
+    #                                 donotadd.append(these_words)
+    #                         else:
+    #                             pass
+    #                             #print("word in removesymbols")
+    #             prevword = word
+    #         myCounters[0] = {(): totalwords}
+    #         return itertools.compress([lines, myDocFreq, myCounters], [givelines, givedf, 1])
+    #
+    #
+    #         # for line in textinput_iterator: #for each line
+    #         #     lastnwords.clear()
+    #         #     donotadd = []
+    #         #     lines +=1
+    #         #     for word in line:
+    #         #         totalwords +=1
+    #         #         lastnwords.extend(word)
+    #         #         for m in range_to_build:
+    #         #             if m >= len(lastnwords):
+    #         #                 these_words = tuple(itertools.islice(lastnwords, n-m, len(lastnwords)+1)) #list(itertools.islice(q, 3, 7))
+    #         #                 myCounters[m][these_words] +=1
+    #         #                 if these_words not in donotadd:
+    #         #                     myDocFreq[m][these_words] +=1
+    #         #                     donotadd.append(these_words)
+    #         # myCounters[0] = {(): totalwords}
+    #         # return itertools.compress([lines, myDocFreq, myCounters], [givelines, givedf, 1])
+
+
+
+#
+# class GlobalLanguageModel(LanguageModel):
+#     '''Build a LM over all the documents in the input.'''
+#     def __init__(self, *args):
+#         LanguageModel.__init__(self, *args)
+#         #build a global counts over entire corpus for global stats
+#         print("we got here")
+#         self.lines, self.docfreq, self.ngrams = self.build_ngram_counts(self.make_flat_iterator(self.input), self.order,
+#                                               #buildlowerorder=self.lm_params.save_lower_orders,
+#                                               givedf=True, givelines=True)
+#         #each of these reiterates of the self.ngrams dict
+#         self.count_of_counts = self.build_count_of_counts() #self.ngrams#buildlowerorder = self.lm_params.save_lower_orders)
+#         self.wc = self.calc_total_wc(self.ngrams)
+#         self.vocabsize = self.calc_vocab_size(self.ngrams)
