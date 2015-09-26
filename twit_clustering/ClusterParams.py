@@ -91,6 +91,7 @@ class IyerOstendorf1(HardClusterParams):
 class Goodman(HardClusterParams):
     """Parameters for Goodman's clustering sentences into topic clusters"""
     def __init__(self, *args):
+        raise NotImplementedError
         HardClusterParams.__init__(self, args)
         #self.scorefunction = minimize_unigram_perplexity
         self.ngram_order = 1
