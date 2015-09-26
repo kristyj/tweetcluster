@@ -20,7 +20,7 @@ class ComparisonTable(object):
         '''Initialise a table width x width'''
         self.width = width
         print('table will be so wide:', width)
-        self.table = np.zeros((width, width))
+        self.table = np.zeros((width, width), dtype=np.dtype('f4'))
         self.score_function = scorefunction
         print("Empty comparison table initialised")
 
@@ -43,6 +43,8 @@ class ComparisonTable(object):
         '''Query the scores table and give ids of the things to merge'''
         bestfound = False
         topscore = np.max(self.table, axis=(1,0))
+        print("ct topscore", topscore)
+        #print('table is', self.table)
         if topscore <= 0:
             print("Scores are all below the threshold, no more merges made")
             return None, None

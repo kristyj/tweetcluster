@@ -91,6 +91,7 @@ def main():
 
     #read the input file and write output
     with open(args.input_json_file, 'r', encoding='utf-8') as finput:
+        print('about to print to', args.output_prefix+'.'+ 'train')
         ftrain, fdev, ftest = [open(args.output_prefix+'.'+ x[1], 'w', encoding='utf-8')
                                for x in zip(split_ratio, ['train', 'dev','test'])]# if x[0] > 0]
         file_holder = [ftrain, fdev, ftest]
@@ -114,7 +115,7 @@ def main():
         f.close()
 
 #example command:
-'''./JSONTweet original_json_file ./output/july -rtra 8 -rdev 1 -rtest 1 -mask_url -mask_user -fields id text '''
+'''./JSONTweet original_json_file ./output/ -rtra 8 -rdev 1 -rtes 1 -mask_url -mask_user -fields id text '''
 '''-bs'''#if taking large temporally adjacent blocks
 
 if __name__=="__main__":

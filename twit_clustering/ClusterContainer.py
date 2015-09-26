@@ -6,6 +6,7 @@ from twit_clustering.LanguageModel import LanguageModel
 from twit_clustering.DocSplitter import DocSplitter
 import numpy as np
 import random
+from twit_clustering.LMParams import LMParams
 
 
 class BaseClusterContainer(object):
@@ -83,7 +84,7 @@ class BaseClusterContainer(object):
         """Write the document ids for the things in the cluster to the specified filename (m files created)."""
         for n in range(self.m):
             o = open(self.out_dir+self.file_prefix+'_'+str(n)+'.docs', 'w', encoding='utf-8')
-            docinds = self.give_docs_in_cluster(n, only_ins=True)
+            docinds = self.give_docs_in_cluster(n, just_best_score=True)
             for docid in docinds:
                 if idsonly:
                     o.write('\t'.join(self.name_this_docs(docid))+'\n')
@@ -96,9 +97,10 @@ class BaseClusterContainer(object):
             o = open(self.out_dir+self.file_prefix+'_'+str(n)+'.topcounts', 'w', encoding='utf-8')
             lm = self.cluster_lms[n]
             print("This should be an LM object", lm)
-            counts = lm.give_ordered_wcs(order, all=fulllm)
-            print("count output",counts)
-            o.write('\n'.join(['{}\t{}'.format(' '.join(c[0]), str(c[1])) for c in counts]))
+            if type(lm) == LanguageModel:
+                counts = lm.give_ordered_wcs(order, all=fulllm)
+                print("count output",counts)
+                o.write('\n'.join(['{}\t{}'.format(' '.join(c[0]), str(c[1])) for c in counts]))
 
     def print_to_console(self):
         """Print the document ids for each cluster to the terminal."""
@@ -163,7 +165,7 @@ class SoftClusterContainer(BaseClusterContainer):
     def initialise_randomly(self):
         """Give random topic assignments to each doc, summing to 1 """
         for d in self.doc_cluster_asm:
-            rand_vector = [random.random() for x in len(d)]
+            rand_vector = [random.random() for x in range(len(d))]
             ass_vector = [x/sum(rand_vector) for x in rand_vector]
             d = ass_vector  # exploit mutability of list values.
 
@@ -175,13 +177,13 @@ class SoftClusterContainer(BaseClusterContainer):
         else:
             return self.doc_cluster_asm[doc_id]
 
-    def give_docs_in_cluster(self, cluster_id, just_best_score=False):
+    def give_docs_in_cluster(self, cluster_id, just_best_score=False, **kwargs):
         """Soft variant: Return the document scores for the cluster,
         or if just_best_score then the docs that are maximally assigned here."""
         if just_best_score:
-            return np.where(self.soft_to_hard_clusters()[:,cluster_id]==1)
+            return [int(x) for x in np.where(self.soft_to_hard_clusters()[:, cluster_id] == 1)[0]]
         else:
-            return self.doc_cluster_asm[:, cluster_id]
+            return [int(x) for x in self.doc_cluster_asm[:, cluster_id]] # get every row (each doc)
 
     def soft_to_hard_clusters(self):
         """Return a matrix from soft clusters that gives the best assignment as they stand."""
@@ -217,7 +219,7 @@ class IyerOstendorfEM(SoftClusterContainer):
                 # set order
                 lm.order = self.cps.ngram_order
                 # set lm_params
-                lm.lm_params = self.cps.lm_names # note: order from lm_params and cps could be out of sync
+                lm.lm_params = LMParams(lm.order, self.cps.lm_names) # note: order from lm_params and cps could be out of sync
 
                 # manually off, because topic LMs work over corpus now, and no longer using tf.idf
                 lm.bydoc = False
@@ -318,7 +320,7 @@ class GildeaHoffmanEM(SoftClusterContainer):
         super().__init__(*args, **kwargs)
 
         #make a language model over all the documents recording wordcounts
-        self.universal_lm = LanguageModel([t for t in self.give_docs()], 1, bydoc=True) #TODO: other args
+        self.universal_lm = LanguageModel([t for t in self.give_docs()], 1, ('add-one', 'none', 'none'), bydoc=True, ) #TODO: other args
 
 
         # initialise random topic/document associations
@@ -361,13 +363,13 @@ class HardClusterContainer(BaseClusterContainer):
         self.lm_order = self.cps.ngram_order
         self.merged_away = []
 
-    def give_docs_in_cluster(self, cluster_id, only_ins=False):
+    def give_docs_in_cluster(self, cluster_id, only_ins=False, **kwargs):
         """Hard variant: Return either the vector for the cluster number,
         or if only_ins the indices (eg doc ids) as list where they were in."""
         if only_ins:
-            return np.where(self.doc_cluster_asm[:, cluster_id] == 1)[0]
+            return [int(x) for x in np.where(self.doc_cluster_asm[:, cluster_id] == 1)[0]]
         else:
-            return self.doc_cluster_asm[:, cluster_id]
+            return [int(x) for x in self.doc_cluster_asm[:, cluster_id]]
 
     def give_clusters_for_doc(self, doc_id):
         """Hard variant: given a doc, return an integer (cluster number it is in)"""
@@ -575,7 +577,7 @@ def main():
         myhierclusters.write_to_files()
         myhierclusters.write_wcs_to_files(1, fulllm=False)
 
-    if True:
+    if False:
         # iterations, data, ngram-order, parameters
         myflatclusters = FlatClusterContainer(3, list(zip(ids, textdata)), 5, Cp.Goodman, prefix='unigram') # fields=('id', 'usr', 'text'))
         print(1)
@@ -591,15 +593,22 @@ def main():
         for i in range(myflatclusters.m):
             print('lms', i, '\n', myflatclusters.cluster_lms[i].ngrams )
         myflatclusters.print_to_console()
-        #myflatclusters.write_to_files()
-        #myflatclusters.write_wcs_to_files(1, fulllm=False)
+        myflatclusters.write_to_files()
+        myflatclusters.write_wcs_to_files(1, fulllm=False)
 
     if False:
         myem_1 = IyerOstendorfEM(list(zip(ids, textdata)), 5, Cp.IyerOstendorf2, iters=2, clustercontainer=myflatclusters, prefix='io2', )
         print(1)
         print('asm', myem_1.doc_cluster_asm)
+
+        print(myem_1.soft_to_hard_clusters())
         myem_1.write_to_files()
         myem_1.write_wcs_to_files(1, fulllm=False)
+
+    if True:
+        gh = GildeaHoffmanEM(list(zip(ids, textdata)), 5, Cp.Goodman, iters=2, prefix='gh', )
+        gh.write_to_files()
+        gh.write_wcs_to_files(1, fulllm=False)
 
 #data_in_list, m, cluster_type,fieldnames = (), outdirectory='./clusters/', prefix=None):
     #myhierclusters = IyerOstendorf1(data, 2,)

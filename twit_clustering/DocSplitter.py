@@ -28,7 +28,7 @@ class DocSplitter(object):
             try:
                 self.text_location = self.fieldnames.index('text')
             except:
-                self.text_location = 1
+                self.text_location = -1
             try:
                 self.id_location = self.fieldnames.index("id")
             except:
@@ -137,7 +137,15 @@ class TweetObject(object):
         return str([x for x in self.__dir__() if x.startswith('__')==False])
 
 
-def textToList(text, splitpunct=True, masknums=True, presup=False):
+def textToList(text, splitpunct=True, masknums=True, presup=False,
+               maskusr = True, maskurl = True, maskhashtag = False ):
+    """Split the given text to a list, with following parameters:
+    splitpunct - True if single-character punctuation should be split into a different token
+    masknums - True if all 0-9 digits should be replaced with the number 5
+    presup - true to preserve upper/lower case distinction, else everything is put to lower case
+    maskusr - True if every username converted to @usr
+    maskurl - True if every url converted to //URL
+    maskhashtag - True if every hashtag converted to #tag"""
     if not type(text)==str:
         print("This can only split a string")
         TypeError
@@ -148,6 +156,13 @@ def textToList(text, splitpunct=True, masknums=True, presup=False):
         text = re.sub(r'[0-9]', r'5', text)
     if not presup:
         text = text.lower()
+    if maskusr:
+        text = re.sub(r"(?<!\w)\@[^\s]+", '@usr', text)
+    if maskurl:
+        text = re.sub(r"(http:\S+)|(https:\S+)", '//URL', text)
+    if maskhashtag:
+        text = re.sub(r"(?<!\w)\#[^\s]+", '#tag', text)
+
     text = re.split(r'\s+', text) #splits at all whitespace
     return [t for t in text if t !='']  #TODO: This iteration removes the empty string at the end of the list. Why is this occurring?
 

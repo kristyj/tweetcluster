@@ -23,11 +23,14 @@ class LanguageModel(object):
             raise TypeError
         else:
             self.lm_params = LMParams(n, lm_names) #now lm_params holds all the info about things that need to be trained
+            self.range_to_build = (range(n, 0, -1) if self.lm_params.dict['save_lower_orders'] else range(n, n-2, -1))
             self.input = documents
             #print("Now setting LM order")
             self.order = self.lm_params.order
             self.bydoc = bydoc
             self.give_df = givedf
+
+        print('****', self.lm_params.dict)
 
         # create a list of start/end symbols to be ignored in LM
         from itertools import permutations
@@ -89,7 +92,8 @@ class LanguageModel(object):
         lastnwords = deque(maxlen=n) #initialise deque
 
         # build all orders if specified, else just n and n-1 (for history)
-        range_to_build = (range(n, 0, -1) if self.lm_params.save_lower_orders else range(n, n-2, -1))
+        #print('LM parameters are!!!', self.lm_params.dict)
+
 
         # for x in range_to_build:
         #     print(x)
@@ -97,23 +101,23 @@ class LanguageModel(object):
         self.df = {}
         self.lm_by_doc = []
 
-        self.ngrams = {m:  Counter() for m in range_to_build}  #  build descending ngram dicts
-        self.docfreq = {m: Counter() for m in range_to_build}
+        self.ngrams = {m:  Counter() for m in self.range_to_build}  #  build descending ngram dicts
+        self.docfreq = {m: Counter() for m in self.range_to_build}
 
         self.deleted_symbols = {m: Counter() for m in range(1, self.order)}
 
         # iterate over every doc/word
-        for doc in  text_by_line :
+        for doc in text_by_line :
             self.lines += 1
-            thisdoc = {m: Counter() for m in range_to_build}
+            thisdoc = {m: Counter() for m in self.range_to_build}
             for word in [self.startsymbol] * (self.order-1) + doc + [self.endsymbol] * (self.order-1):
                 # for each word
                 if word not in self.removesymbols:
-                    self.totalwords += 1 # TODO: This does not count start/end symbols
+                    self.totalwords += 1  # TODO: This does not count start/end symbols
 
                 lastnwords.extend([word])
                 #print('range to build', [x for x in range_to_build])
-                for m in range_to_build:        # do biggest possible ngram first
+                for m in self.range_to_build:        # do biggest possible ngram first
                     #print("Building this number of words", m, 'starting', n-m)
                     if m <= len(lastnwords) and m > 0:    # exclude where m does not get enough data eg start of text
 
@@ -133,16 +137,16 @@ class LanguageModel(object):
             if bydoc:
                 self.lm_by_doc.append(thisdoc)
             if self.give_df:
-                for m in range_to_build:
+                for m in self.range_to_build:
                     for word in thisdoc[m].keys():
                         self.docfreq[m][word] += 1
 
             # update the global LM based on this document
-            for m in range_to_build:
+            for m in self.range_to_build:
                 self.ngrams[m].update(thisdoc[m])
 
         self.calc_vocab_size()
-        if self.lm_params.save_count_of_counts:
+        if self.lm_params.dict['save_count_of_counts']:
             self.build_count_of_counts()
 
     def build_count_of_counts(self):
@@ -150,7 +154,7 @@ class LanguageModel(object):
         out_dict = {}
         for i, tupcount in self.ngrams.items():
             #print("tupcount",i,tupcount)
-            if not self.lm_params.save_lower_orders and i != max(self.ngrams.keys()):
+            if not self.lm_params.dict['save_lower_orders'] and i != max(self.ngrams.keys()):
                 #print(i)
                 continue
             out_dict[i] = Counter()
@@ -223,10 +227,13 @@ class LanguageModel(object):
         """Give the probability of the ngram, either linear or log, depending on format."""
         input_tuple = tuple(input_tuple)
 
-        p = self.lm_params.smoothing_eqn(self, self.order, input_tuple)
+        p = self.lm_params.dict['smoothing_eqn'](self, self.order, input_tuple)
         #p = self.lm_params.lm_eqn(self, self.order, input_tuple) #regular probability
         if p == 0.0:
             raise ZeroDivisionError
+        if p is None:
+            print('Something has a zzero-probability, use smoothing...')
+            raise ValueError
         #print("p",p)
         if format == 1:
             return p
@@ -264,7 +271,7 @@ class LanguageModel(object):
         n = self.order
 
         if type(input) == list:
-            range_to_build = (range(n, 0, -1) if self.lm_params.save_lower_orders else range(n, n-2, -1))
+            range_to_build = (range(n, 0, -1) if self.lm_params.dict['save_lower_orders'] else range(n, n-2, -1))
             for order in range_to_build:
                 for tup in self.duplicate_to_ngrams(input, n):
                     self.ngrams[order][tup] +=1 #Type is counter so default value 0 assumed
@@ -283,8 +290,8 @@ class LanguageModel(object):
 
     def decrement_counts(self, sentence_list):
         n = self.order
-        range_to_build = (range(n, 0, -1) if self.lm_params.save_lower_orders else range(n, n-2, -1))
-        for order in range_to_build:
+        self.range_to_build = (range(n, 0, -1) if self.lm_params.dict['save_lower_orders'] else range(n, n-2, -1))
+        for order in self.range_to_build:
             for tup in self.duplicate_to_ngrams(sentence_list, n):
                 self.ngrams[order][tup] -=1 #Type is counter so default value 0 assumed
 
@@ -320,7 +327,7 @@ if __name__=="__main__":
     sentences = [x.split(' ')for x in rawtext.split('\n')]
     print('sents', sentences)
     # build the LM
-    mylm = LanguageModel(sentences, 5, ('maximum-likelihood', 'linear-interpolation', 'none'), holdbuild=False, bydoc=True, givedf=True)
+    mylm = LanguageModel(sentences, 5, ('add-one', 'none', 'none'), holdbuild=False, bydoc=True, givedf=True)
     #args are: self, documents, n, lm, smoothing, discparams, holdbuild=False, bydoc=False, give_df=False):
 
     # inspect the global language model
